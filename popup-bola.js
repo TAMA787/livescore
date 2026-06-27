@@ -1599,7 +1599,7 @@
                 return {
                     aktif: true,
                     fase: "full_time",
-                    deskripsi: "Pertandingan selesai",
+                    deskripsi: "Pertandingan Selesai",
                     kickoff: kickoff,
                     mulaiTampil: mulaiTampil,
                     selesaiTampil: new Date(batasFullTimeMs),
@@ -1616,7 +1616,7 @@
             return {
                 aktif: false,
                 fase: "selesai",
-                deskripsi: "Pertandingan selesai",
+                deskripsi: "Pertandingan Selesai",
                 kickoff: kickoff,
                 mulaiTampil: mulaiTampil,
                 selesaiTampil: new Date(batasFullTimeMs),
@@ -1639,7 +1639,7 @@
             return {
                 aktif: false,
                 fase: "selesai_tanpa_status",
-                deskripsi: "Pertandingan selesai",
+                deskripsi: "Pertandingan Selesai",
                 kickoff: kickoff,
                 mulaiTampil: mulaiTampil,
                 selesaiTampil: selesaiTampil,
@@ -1668,7 +1668,7 @@
             deskripsi = "Pertandingan dihentikan sementara";
         } else if (sebelumKickoff && !liveDariStatus) {
             fase = "akan_mulai";
-            deskripsi = "Pertandingan akan di mulai, ayo tonton gratis";
+            deskripsi = "Menunggu Pertandingan Di Mulai";
         } else {
             fase = "sedang_berlangsung";
             deskripsi = "Sedang berlangsung, ayo tonton gratis";
@@ -2150,7 +2150,7 @@
         link.className = "popup-score-link";
         link.target = "_blank";
         link.rel = "noopener";
-        link.textContent = "KLIK DISINI";
+        link.textContent = "NONTON DISINI";
         ctaRow.appendChild(bottom);
         ctaRow.appendChild(link);
         var close = document.createElement("button");
