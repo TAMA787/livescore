@@ -1,47 +1,93 @@
 (function () {
   "use strict";
+
+
   var JADWAL_OTOMATIS_URL =
     "https://a3d4pt0.vendorscore.live/api/pialadunia/matches";
 
   var MOBILE_MAX_WIDTH = 720;
   var MOBILE_MEDIA_QUERY = "(max-width: " + MOBILE_MAX_WIDTH + "px)";
+
   var TANGGAL_JADWAL = "";
+
   var AMBIL_JADWAL_KEMARIN = false;
   var AMBIL_JADWAL_BESOK = true;
+
+  // Ganti dengan link nonton kamu.
   var LINK_KLIK_DISINI = "https://link.zonalivebola.com/";
-  var TARGET_SELECTOR = ".owl-wrapper-outer";
+
+  // Target posisi popup setelah slider
+  var TARGET_SELECTOR = "#livescore-banner-slot, .owl-wrapper-outer";
   var TARGET_INDEX = 0;
+
   var TAMPILKAN_SEBELUM_KICKOFF_SEPANJANG_WAKTU = true;
+
+  // Banner aktif di SEMUA perangkat (desktop + HP).
+  // Kalau mau batasi ke mobile saja, set window.POPUP_BOLA_HANYA_MOBILE = true.
   var HANYA_MOBILE =
     typeof window !== "undefined" &&
-    window.POPUP_BOLA_HANYA_MOBILE === false
-      ? false
-      : true;
+    window.POPUP_BOLA_HANYA_MOBILE === true
+      ? true
+      : false;
+
+  // Worker football-data memakai cache server. Biarkan false.
   var PAKAI_NOCACHE_WORKER = false;
+
+  // Dipakai kalau TAMPILKAN_SEBELUM_KICKOFF_SEPANJANG_WAKTU = false.
   var MENIT_SEBELUM_KICKOFF = 10;
+
+  // 45 menit babak 1 + 15 menit istirahat + 45 menit babak 2.
   var DURASI_PERTANDINGAN_MENIT = 105;
+
+  // Saat pertandingan sedang berlangsung, ambil skor setiap 5 detik.
   var REFRESH_DATA_LIVE_MS = 5 * 1000;
+
+  // Saat tidak ada pertandingan berlangsung, perbarui jadwal setiap 1 jam.
   var REFRESH_DATA_IDLE_MS = 60 * 60 * 1000;
+
+  // Jendela maksimum untuk menganggap pertandingan masih berjalan berdasarkan jam.
   var DURASI_REFRESH_LIVE_MENIT = 180;
+
+  // Setelah API memberi status FINISHED, skor akhir dan label FULL TIME
+  // tetap ditampilkan selama 10 menit sebelum pindah ke pertandingan berikutnya.
   var TAHAN_FULL_TIME_MENIT = 10;
   var TAHAN_FULL_TIME_MS = TAHAN_FULL_TIME_MENIT * 60 * 1000;
+
+  // Batalkan request jika Worker tidak merespons dalam 8 detik.
   var REQUEST_TIMEOUT_MS = 8000;
+
+  // Cek popup dan countdown setiap 1 detik.
   var CEK_POPUP_MS = 1000;
+
   var POPUP_ID = "popup-bola-auto-saranglive-v3";
   var STYLE_ID = "popup-bola-auto-saranglive-style-v3";
+
   var pertandingan = [];
   var popupDitutup = {};
   var sedangAmbilData = false;
   var waktuAmbilDataTerakhir = 0;
+
   var intervalRekomendasiWorkerMs = REFRESH_DATA_IDLE_MS;
+
   var waktuCacheTerakhir = 0;
+
   var REQUEST_LOCK_KEY = "popup_bola_worker_request_lock_v2";
   var REQUEST_LOCK_MS = Math.max(REQUEST_TIMEOUT_MS + 2000, 12000);
-  var TAB_ID = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  var TAB_ID =
+    Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+
   var waktuSelesaiLokal = {};
+
   var jamPertandinganLokal = {};
+
   var CACHE_KEY_PERTANDINGAN = "popup_bola_production_live_ht_ft_hhmmss_v2";
   var CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+
+  /*
+    ==================================================
+    CSS POPUP
+    ==================================================
+  */
 
   function hapusStyleLama() {
     var ids = [
@@ -62,6 +108,11 @@
       }
     }
   }
+
+  // SVG filter untuk efek bendera bergelombang (riak kain).
+  // feTurbulence menghasilkan pola, feDisplacementMap menggeser piksel
+  // bendera mengikuti pola itu sehingga permukaan terlihat bergelombang.
+  // baseFrequency dianimasikan via <animate> agar gelombang bergerak.
   function pasangFilterBendera() {
     if (document.getElementById("popup-flag-wave-svg")) {
       return;
@@ -82,6 +133,8 @@
     svg.innerHTML =
       '<defs>' +
       '<filter id="popupFlagWaveFilter" x="-35%" y="-45%" width="170%" height="190%">' +
+      // baseFrequency X kecil = gelombang lebar; Y sedang = naik-turun.
+      // displacement memakai channel G (vertikal) lebih besar agar gerak naik-turun dominan.
       '<feTurbulence type="fractalNoise" baseFrequency="0.007 0.022" numOctaves="2" seed="2" result="noise">' +
       '<animate attributeName="seed" dur="12s" ' +
       'values="2; 12" calcMode="linear" repeatCount="indefinite"/>' +
@@ -99,7 +152,10 @@
   }
 
   function pasangCSS() {
+    // Filter SVG lama tidak dipakai lagi (sekarang pakai canvas gelombang).
+
     var styleLama = document.getElementById(STYLE_ID);
+
     if (
       styleLama &&
       styleLama.getAttribute("data-versi") ===
@@ -107,9 +163,11 @@
     ) {
       return;
     }
+
     if (styleLama && styleLama.parentNode) {
       styleLama.parentNode.removeChild(styleLama);
     }
+
     var css = `
       #${POPUP_ID} {
         box-sizing: border-box !important;
@@ -119,10 +177,10 @@
         margin: 6px auto 9px auto !important;
         padding: 8px 34px 8px 8px !important;
         border-radius: 9px !important;
-        border: 2px solid #f5c542 !important;
-        background: linear-gradient(270deg, rgba(120,8,8,1) 0%, rgba(190,20,20,1) 21%, rgba(214,28,28,1) 40%, rgba(160,12,12,1) 60%, rgba(200,24,24,1) 80%, rgba(120,8,8,1) 100%);
-        box-shadow: inset 0 1px 0 rgb(255 220 120 / 55%), 0 0 0 1px rgba(0, 0, 0, 0.3), 0 3px 8px rgba(0, 0, 0, 0.5) !important;
-        color: #ffffff !important;
+border: 2px solid #f5c542 !important;
+    background: linear-gradient(270deg, rgba(120,8,8,1) 0%, rgba(190,20,20,1) 21%, rgba(214,28,28,1) 40%, rgba(160,12,12,1) 60%, rgba(200,24,24,1) 80%, rgba(120,8,8,1) 100%);
+    box-shadow: inset 0 1px 0 rgb(255 220 120 / 55%), 0 0 0 1px rgba(0, 0, 0, 0.3), 0 3px 8px rgba(0, 0, 0, 0.5) !important;
+    color: #ffffff !important;
         display: block !important;
         position: relative !important;
         z-index: 999999 !important;
@@ -264,6 +322,9 @@
         display: block !important;
         pointer-events: none !important;
       }
+
+      /* Gambar sumber disembunyikan; yang tampil adalah versi canvas.
+         Saat canvas belum siap, img dipakai sebagai cadangan. */
       #${POPUP_ID} .popup-score-flag-source {
         position: absolute !important;
         inset: 0 !important;
@@ -369,6 +430,7 @@
         }
       }
 
+      /* Animasi pergantian pertandingan: slide masuk dari atas ke bawah */
       @keyframes popupSlideTurunMasuk {
         0%   { opacity: 0; transform: translateY(-22px); }
         100% { opacity: 1; transform: translateY(0); }
@@ -641,9 +703,9 @@
   }
 
   /*
-    ==============
+    ==================================================
     HELPER DATA
-    ==============
+    ==================================================
   */
 
   function teksBersih(value) {
@@ -891,6 +953,8 @@
     }
   }
 
+  // Pemetaan kode tim (FIFA, dari API) -> kode negara 2-huruf (ISO) untuk flagcdn.
+  // flagcdn.com menyediakan bendera semua negara dengan pola URL yang konsisten.
   var PETA_KODE_BENDERA = {
     MEX: "mx", RSA: "za", KOR: "kr", CZE: "cz", CAN: "ca", BIH: "ba",
     USA: "us", PAR: "py", QAT: "qa", SUI: "ch", BRA: "br", MOR: "ma",
@@ -909,8 +973,9 @@
     var k = String(kode).toUpperCase();
     var iso = PETA_KODE_BENDERA[k];
     if (!iso) {
-      return ""; 
+      return ""; // tidak dikenal (mis. tim placeholder "W73") -> pakai fallback logo API
     }
+    // w1280 = lebar tinggi supaya tajam; format png.
     return "https://flagcdn.com/w1280/" + iso + ".png";
   }
 
@@ -1061,6 +1126,12 @@
     };
   }
 
+  /*
+    ==================================================
+    TANGGAL JADWAL
+    ==================================================
+  */
+
   function tanggalWIB(offsetHari) {
     offsetHari = offsetHari || 0;
 
@@ -1129,6 +1200,12 @@
 
     return JADWAL_OTOMATIS_URL + pemisah + params.join("&");
   }
+
+  /*
+    ==================================================
+    CACHE DATA
+    ==================================================
+  */
 
   function simpanCachePertandingan(data) {
     try {
@@ -1231,6 +1308,12 @@
       }
     } catch (e) {}
   }
+
+  /*
+    ==================================================
+    AMBIL DATA DARI WORKER
+    ==================================================
+  */
 
   function setDataPertandinganDariArray(
     arr,
@@ -1337,6 +1420,7 @@
         } else if (data && data.success && Array.isArray(data.matches)) {
           semuaMatches = data.matches;
         } else if (Array.isArray(data && data.data)) {
+          // Dukungan untuk API yang mengembalikan {data:[...]}
           semuaMatches = data.data;
         } else if (Array.isArray(data)) {
           semuaMatches = data;
@@ -1443,6 +1527,12 @@
       Date.now() - waktuAmbilDataTerakhir >= ambilIntervalRefreshSaatIni()
     );
   }
+
+  /*
+    ==================================================
+    JAM PERTANDINGAN, HALF TIME, DAN FULL TIME
+    ==================================================
+  */
 
   function formatSisaDurasi(ms) {
     var totalDetik = Math.max(0, Math.ceil(ms / 1000));
@@ -1570,6 +1660,12 @@
 
     return formatDurasiHMS(detikSejakKickoff);
   }
+
+  /*
+    ==================================================
+    LOGIC WAKTU POPUP
+    ==================================================
+  */
 
   function ambilInfoPertandingan(match, sekarang) {
     var kickoff = ambilKickoff(match);
@@ -1704,9 +1800,11 @@
     };
   }
 
+  // Kembalikan SEMUA pertandingan yang layak tampil (live, selesai-hold, akan datang),
+  // sudah diurutkan. Dipakai untuk rotasi slide.
   function ambilDaftarPertandinganAktif() {
     var sekarang = new Date();
-    var tanggalHariIni = tanggalWIB(0);
+    var tanggalHariIni = tanggalWIB(0); // "YYYY-MM-DD" hari ini (WIB)
     var kandidat = [];
 
     for (var i = 0; i < pertandingan.length; i++) {
@@ -1716,6 +1814,8 @@
         continue;
       }
 
+      // Hanya tampilkan pertandingan HARI INI dan SETELAHNYA.
+      // Lewati pertandingan dengan tanggal sebelum hari ini.
       if (match.tanggal && match.tanggal < tanggalHariIni) {
         continue;
       }
@@ -1749,10 +1849,10 @@
   }
 
   // === ROTASI SLIDE ===
-  var ROTASI_MS = 5000;           
-  var rotasiIndex = 0;            
-  var rotasiTerakhirMs = 0;     
-  var rotasiIdTampil = null;     
+  var ROTASI_MS = 5000;            // tiap pertandingan tampil 5 detik
+  var rotasiIndex = 0;            // indeks pertandingan yang sedang tampil
+  var rotasiTerakhirMs = 0;       // kapan terakhir berganti
+  var rotasiIdTampil = null;      // id pertandingan yang sedang tampil
 
   function ambilPertandinganAktif() {
     var daftar = ambilDaftarPertandinganAktif();
@@ -1761,22 +1861,36 @@
       rotasiIdTampil = null;
       return null;
     }
+
     var now = Date.now();
+
+    // Saatnya berganti?
     if (rotasiTerakhirMs === 0) {
       rotasiTerakhirMs = now;
     } else if (now - rotasiTerakhirMs >= ROTASI_MS && daftar.length > 1) {
       rotasiIndex++;
       rotasiTerakhirMs = now;
     }
+
+    // Jaga indeks tetap valid (daftar bisa berubah panjang).
     if (rotasiIndex >= daftar.length) {
       rotasiIndex = rotasiIndex % daftar.length;
     }
+
     var dipilih = daftar[rotasiIndex];
+
+    // Tandai apakah ini pergantian (untuk memicu animasi slide).
     dipilih.isGanti = rotasiIdTampil !== null && rotasiIdTampil !== dipilih.match.id;
     rotasiIdTampil = dipilih.match.id;
 
     return dipilih;
   }
+
+  /*
+    ==================================================
+    COUNTDOWN KECIL
+    ==================================================
+  */
 
   function formatCountdown(match, info) {
     var kickoff = ambilKickoff(match);
@@ -1859,6 +1973,12 @@
     }
   }
 
+  /*
+    ==================================================
+    TARGET POSISI
+    ==================================================
+  */
+
   function ambilTargetOwl() {
     var daftarTarget = document.querySelectorAll(TARGET_SELECTOR);
 
@@ -1891,12 +2011,30 @@
     }
   }
 
+  /*
+    ==================================================
+    BUAT POPUP
+    ==================================================
+  */
+
+  // ==================================================
+  // MESIN GELOMBANG BENDERA (CANVAS)
+  // Menggambar ulang tiap bendera dengan menggeser kolom-kolom piksel
+  // naik-turun mengikuti gelombang sinus yang fase-nya menjalar dari
+  // kiri ke kanan — meniru kibasan kain sarung yang santai.
+  // ==================================================
+
   var mesinGelombangAktif = false;
-  var WAVE_AMPLITUDO = 0.08;  
-  var WAVE_KECEPATAN = 1.0;   
-  var WAVE_REDAM_PANGKAL = true; 
-  var WAVE_SHADING = 0.22;    
-  var WAVE_LEBAR_IRIS = 2;    
+
+  // Pengaturan rasa kibasan (santai, mulus, profesional):
+  var WAVE_AMPLITUDO = 0.08;   // tinggi gelombang relatif thd tinggi bendera
+  var WAVE_KECEPATAN = 1.0;    // kecepatan dasar menjalar (rad/detik)
+  var WAVE_REDAM_PANGKAL = true; // pangkal (kiri) lebih tenang, ujung lebih liar
+  var WAVE_SHADING = 0.22;     // kekuatan bayangan lekukan (0 = tanpa bayangan)
+  var WAVE_LEBAR_IRIS = 2;     // lebar tiap irisan piksel (kecil = halus, berat)
+
+  // Beberapa lapis gelombang dengan frekuensi & kecepatan berbeda.
+  // Kombinasi ini membuat gerakan TIDAK pernah terlihat berulang (organik).
   var WAVE_LAPIS = [
     { panjang: 1.1, amp: 0.6, kecepatan: 1.0 },
     { panjang: 2.3, amp: 0.3, kecepatan: 1.45 },
@@ -1917,6 +2055,8 @@
     var rect = span.getBoundingClientRect();
     var cssW = Math.max(8, Math.round(rect.width));
     var cssH = Math.max(6, Math.round(rect.height));
+
+    // Render tajam di layar HiDPI.
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = Math.round(cssW * dpr);
     var h = Math.round(cssH * dpr);
@@ -1938,6 +2078,8 @@
     var fase = parseFloat(span.getAttribute("data-wave-phase")) || 0;
     var amp = h * WAVE_AMPLITUDO;
     var TAU = Math.PI * 2;
+
+    // Fungsi gelombang gabungan (beberapa sinus) -> gerak organik, tak berulang.
     function offsetDi(x) {
       var nx = x / w; // 0..1 sepanjang lebar
       var total = 0;
@@ -1955,11 +2097,17 @@
 
     try {
       var iris = Math.max(1, Math.round(WAVE_LEBAR_IRIS * dpr));
+
+      // FILL: pakai SELURUH gambar bendera (tidak dipotong), diregangkan agar
+      // muat penuh di canvas. Bendera tampil utuh, semua bagian kelihatan.
       var sX = 0;
       var sY = 0;
       var sW = img.naturalWidth;
       var sH = img.naturalHeight;
       var srcPerPx = sW / w;
+
+      // Margin kecil saja sebagai ruang ayun (amplitudo sudah kecil),
+      // supaya bendera tetap mengisi hampir penuh kotak.
       var margin = amp * 0.5;
       var tinggiBendera = Math.max(2, h - margin * 2);
 
@@ -1979,6 +2127,8 @@
           sX + x * srcPerPx, sY, lebar * srcPerPx, sH,
           x, dy, lebar + 1, dyTinggi
         );
+
+        // Shading: lekukan yang turun diberi bayangan, yang naik diberi highlight.
         if (WAVE_SHADING > 0) {
           var shade = Math.max(-1, Math.min(1, grad * 0.6));
           if (shade > 0) {
@@ -2017,6 +2167,7 @@
   }
 
   function pasangMesinGelombang() {
+    // Hormati pengguna yang mematikan animasi.
     if (
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -2041,6 +2192,12 @@
   }
 
   function buatImgFlag(src, alt) {
+    // Bungkus bendera dalam <span> berisi <canvas> (untuk gambar bergelombang)
+    // dan <img> sumber. Strategi muat dua tahap:
+    //  1. Coba muat dengan crossOrigin -> kalau berhasil, canvas bisa
+    //     menggambar bendera bergelombang.
+    //  2. Kalau crossOrigin gagal (server tak kirim header CORS), muat ulang
+    //     TANPA crossOrigin -> bendera tampil statis, tapi tetap muncul.
     var span = document.createElement("span");
     span.className = "popup-score-flag";
     span.setAttribute("role", "img");
@@ -2066,6 +2223,10 @@
     return span;
   }
 
+  // Muat gambar bendera: coba CORS dulu (untuk canvas), kalau gagal pakai
+  // gambar biasa tanpa CORS (statis, tapi pasti tampil).
+  // Bungkus URL bendera lewat proxy CORS (wsrv.nl) agar bisa digambar ke canvas.
+  // Set PAKAI_PROXY_BENDERA = false kalau benderamu sudah satu domain / ber-CORS.
   var PAKAI_PROXY_BENDERA = true;
   var PROXY_BENDERA_BASE = "https://wsrv.nl/?url=";
 
@@ -2073,9 +2234,11 @@
     if (!PAKAI_PROXY_BENDERA || !src) {
       return src;
     }
+    // Jangan proxy kalau sudah lewat proxy atau sudah relatif (satu domain).
     if (src.indexOf("wsrv.nl") !== -1 || src.charAt(0) === "/") {
       return src;
     }
+    // n=-1 (tanpa) — biarkan ukuran asli; output png agar transparansi aman.
     return PROXY_BENDERA_BASE + encodeURIComponent(src) + "&output=png";
   }
 
@@ -2083,13 +2246,20 @@
     if (!src) {
       return;
     }
+
     span.removeAttribute("data-flag-ready");
+
+    // URL bendera dilewatkan via proxy CORS (wsrv.nl) supaya canvas boleh
+    // menggambarnya. Tanpa ini, server bendera memblokir akses canvas.
     var srcProxy = urlProxiBendera(src);
+
+    // Tahap 1: dengan crossOrigin via proxy -> memungkinkan canvas menggambar.
     var percobaanCors = new Image();
     percobaanCors.crossOrigin = "anonymous";
     percobaanCors.decoding = "async";
 
     percobaanCors.onload = function () {
+      // Berhasil dengan CORS: pakai gambar proxy ini untuk canvas (bergelombang).
       img.crossOrigin = "anonymous";
       img.onload = function () {
         span.setAttribute("data-flag-ready", "1");
@@ -2097,16 +2267,21 @@
         pasangMesinGelombang();
       };
       img.onerror = function () {
+        // Proxy gagal -> bendera statis dari sumber asli.
         muatBenderaBiasa(span, img, canvas, src);
       };
       img.src = srcProxy;
     };
 
     percobaanCors.onerror = function () {
+      // Proxy gagal -> tampilkan bendera statis biasa (sumber asli).
       muatBenderaBiasa(span, img, canvas, src);
     };
+
     percobaanCors.src = srcProxy;
   }
+
+  // Bendera statis tanpa CORS: pasti tampil, tapi tidak bergelombang.
   function muatBenderaBiasa(span, img, canvas, src) {
     span.removeAttribute("data-flag-ready");
     if (canvas) {
@@ -2208,6 +2383,8 @@
 
     var img = spanFlag.querySelector(".popup-score-flag-source");
     var canvas = spanFlag.querySelector(".popup-score-flag-canvas");
+
+    // Hanya muat ulang kalau sumbernya benar-benar berubah.
     if (spanFlag.getAttribute("data-flag-src") !== src) {
       spanFlag.setAttribute("data-flag-src", src || "");
       if (img) {
@@ -2318,18 +2495,33 @@
 
     updateIsiPopup(popup, match, info);
 
-    if (target.nextElementSibling !== popup) {
+    // Kalau target adalah slot khusus (#livescore-banner-slot), masukkan banner
+    // KE DALAM slot itu (di posisi yang kamu tentukan). Selain itu, tempel setelahnya.
+    var slotKhusus = target.id === "livescore-banner-slot";
+    if (slotKhusus) {
+      if (popup.parentNode !== target) {
+        target.appendChild(popup);
+      }
+    } else if (target.nextElementSibling !== popup) {
       target.insertAdjacentElement("afterend", popup);
     }
 
+    // Animasi slide masuk saat pertandingan berganti (rotasi) atau popup baru.
     if (bikinBaru && (info.isGanti || rotasiIdTampil)) {
       popup.classList.remove("popup-score-slide-masuk");
+      // paksa reflow agar animasi bisa dijalankan ulang
       void popup.offsetWidth;
       popup.classList.add("popup-score-slide-masuk");
     }
 
     return true;
   }
+
+  /*
+    ==================================================
+    MODE MOBILE SAJA
+    ==================================================
+  */
 
   function modeMobileAktif() {
     if (!HANYA_MOBILE) {
@@ -2357,6 +2549,12 @@
     hapusPopup();
     hapusStyleLama();
   }
+
+  /*
+    ==================================================
+    CEK DAN TAMPILKAN
+    ==================================================
+  */
 
   function cekDanTampilkanPopup() {
     if (!modeMobileAktif()) {
@@ -2398,6 +2596,12 @@
       cekDanTampilkanPopup();
     }
   }
+
+  /*
+    ==================================================
+    START
+    ==================================================
+  */
 
   function mulai() {
     if (!modeMobileAktif()) {
